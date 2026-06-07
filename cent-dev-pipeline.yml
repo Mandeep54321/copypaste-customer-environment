@@ -1,0 +1,732 @@
+---
+trigger: none
+
+parameters:
+- name: deploymentEnvironment
+  displayName: Deployment Environment
+  type: string
+  values:
+  - cent-dev
+- name: useMaintenancePage
+  displayName: Maintenance Page during deploy
+  type: boolean
+  default: true
+- name: stopServices
+  displayName: Stop services during database upgrade
+  type: boolean
+  default: true
+- name: deployCESCore
+  displayName: Deploy CES Core
+  type: boolean
+  default: true
+- name: deployCESAPI
+  displayName: Deploy CES API
+  type: boolean
+  default: true
+- name: deployCESAuth
+  displayName: Deploy CES Auth
+  type: boolean
+  default: true
+- name: deployCESKiosk
+  displayName: Deploy CES Kiosk
+  type: boolean
+  default: true
+- name: deployCESWebApps
+  displayName: Deploy CES Web Apps (TTK/TT/UI/Help/CEFHelp)
+  type: boolean
+  default: true
+
+variables:
+- template: ${{ parameters.deploymentEnvironment }}-pipeline-variables.yml
+- group: ${{ parameters.deploymentEnvironment }}
+- name: isDevEnv
+  value: true
+- name: certThumbprint
+  value: 'D2571A5AE1F3C7987B7C5F97BBCBB3D36CDEBA70'
+
+#===============================================================================
+#     ___                                  
+#    / _ \___ ___ ___  __ _____________ ___
+#   / , _/ -_|_-</ _ \/ // / __/ __/ -_|_-<
+#  /_/|_|\__/___/\___/\_,_/_/  \__/\__/___/
+#                                          
+#===============================================================================
+resources:
+  repositories:
+  - repository: templates
+    type: git
+    name: TechOps/deploy-ces
+    ref: refs/tags/v1.0.43
+  pipelines:
+  #- pipeline: ces-database
+  #  project: CES
+  #  source: ces\ces-ci\ces-database-ci
+  #  branch: minor/release-2.5.2
+  - pipeline: ces-build
+    project: CES
+    source: ces-generic-release-build-2.5.X
+    branch: minor/release-2.5.2
+  - pipeline: ces-sif
+    project: CES
+    source: ces-sif-build
+    branch: minor/release-2.5.2
+  - pipeline: ces-help
+    project: CES
+    source: ces\ces-help\ces-help
+    branch: 'main'
+  - pipeline: ces-comms
+    project: CES
+    source: ces-communication-server-build
+    branch: master
+  - pipeline: ces-events
+    project: CES
+    source: ces\ces-events\ces-events
+    branch: minor/release-2.5.2
+  - pipeline: ces-comms-consumers
+    project: CES
+    source: ces-communication-center-consumers
+    branch: minor/release-2.5.2
+  - pipeline: service-seeding
+    project: CES
+    source: ces\ces-service-seeding\ces-service-seeding
+    branch: release/release-2.5.0
+  - pipeline: ces-kiosk-ui
+    project: CES
+    source: ces\ces-kiosk\ces-kiosk-ui-ci
+    branch: release/release-2.4.0
+  - pipeline: ces-kiosk-api
+    project: CES
+    source: ces\ces-kiosk\ces-kiosk-api-ci
+    branch: release/release-2.4.0
+  - pipeline: ces-standard-api
+    project: CES
+    source: ces\ces-standard\ces-standard-webapi-build
+    branch: release/release-1.0.1
+  - pipeline: ces-standard-consumers
+    project: CES
+    source: ces\ces-standard\ces-standard-consumers-build
+    branch: release/release-1.0.1
+  - pipeline: cef-build
+    project: Maximise
+    source: CEFinance-2.4.0
+    branch: '2.4/2.4.0'
+  - pipeline: portal
+    project: CES
+    source: ces-community-portal\ces-community-portal-full-release
+    branch: release/release-2.5.0
+
+stages:
+#===============================================================================
+#    _____                      __
+#   / ___/__ ___  ___ _______ _/ /
+#  / (_ / -_) _ \/ -_) __/ _ `/ / 
+#  \___/\__/_//_/\__/_/  \_,_/_/  
+#                                 
+#===============================================================================
+#-------------------------------------------------------------------------------
+# Licence
+#-------------------------------------------------------------------------------
+- stage:                  licence
+  displayName:            Licence
+  jobs:
+  # Generate Licence
+  - template:             jobs/deploy_licence.yml@templates
+    parameters:
+      licenceDestination: $(licensing.output)
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTags:    Licence
+
+#-------------------------------------------------------------------------------
+# Tools
+#-------------------------------------------------------------------------------
+- stage:                  tools
+  displayName:            Tools
+  variables:
+  - template:             ../../common/legacy/tools-variables.yml
+  jobs:
+  # Initial Data Load Tool
+  - template:             ces/tool/initialdataload_tool.yml@templates
+    parameters:
+      toolName:           'Initial Data Load Tool'
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Tool
+  # Archive Seeding Tool
+  - template:             ces/tool/archiveseeding_tool.yml@templates
+    parameters:
+      toolName:           'Archive Job Seeding Tool'
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Tool
+  # General Seeding Tool
+  - template:             ces/tool/generalseeding_tool.yml@templates
+    parameters:
+      toolName:           'General Job Seeding Tool'
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Tool
+  # Finance Seeding Tool
+  #- template:             cef/tool/financeseeding_tool.yml@templates
+  #  parameters:
+  #    toolName:           'Finance Job Seeding Tool'
+  #    remoteRepo:         true
+  #    environment:        ${{ parameters.deploymentEnvironment }}
+  #    environmentTag:     Tool
+  # Portal Seeding Tool
+  - template:             portal/tool/portalseeding_tool.yml@templates
+    parameters:
+      toolName:           'Community Portal Job Seeding Tool'
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Tool
+
+#===============================================================================
+#    _____________
+#   / ___/ __/ __/
+#  / /__/ _/_\ \  
+#  \___/___/___/  
+#                 
+#===============================================================================
+#-------------------------------------------------------------------------------
+# CES Database
+#-------------------------------------------------------------------------------
+- stage:                  ces_database
+  displayName:            CES Database
+  variables:
+  - template:             ../../common/legacy/ces-database-variables.yml
+  jobs:
+  # Stop Services
+  #- ${{ if eq(parameters.stopServices, true) }}:
+  #  - template:             jobs/stop_services.yml@templates
+  #    parameters:
+  #      remoteRepo:         true
+  #      environment:        ${{ parameters.deploymentEnvironment }}
+  #      environmentTag:     Processing
+  #      serviceFilters:     '(CES|Comm).*${{ parameters.deploymentEnvironment }}$'
+  # Database Upgrade
+  - template:             ces/database/upgrade_ces_db.yml@templates
+    parameters:
+      remoteRepo:         true
+      deploymentTimeout:  180 
+      dbatoolsVersion:    '2.1.12'
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Tool
+
+#-------------------------------------------------------------------------------
+# CES Presentation
+#-------------------------------------------------------------------------------
+- stage:                  ces_presentation
+  displayName:            CES Presentation
+  dependsOn:
+  - licence
+  - ces_database
+  variables:
+  - template:             ../../common/legacy/ces-general-variables.yml
+  jobs:
+  # CES Core
+  - template:             ces/web/ces_core.yml@templates
+    parameters:
+      siteName:           'CES Core ${{parameters.deploymentEnvironment}}'
+      appPool:            'CES Core ${{parameters.deploymentEnvironment}}'
+      licenceRequired:    true
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      deploy:             ${{ parameters.deployCESCore }}
+      isDevEnv:           ${{ variables.isDevEnv }}
+      useMaintenancePage: ${{ parameters.useMaintenancePage }}
+      protocol:           'https'
+      sslThumbprint:      ${{ variables.certThumbprint }}
+      appCmd:             true
+  # CES API
+  - template:             ces/web/ces_api.yml@templates
+    parameters:
+      siteName:           'CES API ${{ parameters.deploymentEnvironment }}'
+      appPool:            'CES API ${{ parameters.deploymentEnvironment }}'
+      licenceRequired:    true
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      deploy:             ${{ parameters.deployCESAPI }}
+      isDevEnv:           ${{ variables.isDevEnv }}
+      useMaintenancePage: ${{ parameters.useMaintenancePage }}
+      protocol:           'https'
+      sslThumbprint:      ${{ variables.certThumbprint }}
+      appCmd:             true
+  # CES Auth
+  - template:             ces/web/ces_auth.yml@templates
+    parameters:
+      siteName:           'CES Auth ${{ parameters.deploymentEnvironment }}'
+      appPool:            'CES Auth ${{ parameters.deploymentEnvironment }}'
+      extraVariables:     variables/common/ces-auth-variables.yml
+      licenceRequired:    true
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      deploy:             ${{ parameters.deployCESAuth }}
+      isDevEnv:           ${{ variables.isDevEnv }}
+      useMaintenancePage: ${{ parameters.useMaintenancePage }}
+      updateScripts:
+      - name: 'Update-CESAuthAppSettings.ps1'
+        arguments: '-SiteReference "${{ parameters.deploymentEnvironment }}" -Domain "civica.education"'
+      protocol:           'https'
+      sslThumbprint:      ${{ variables.certThumbprint }}
+      appCmd:             true
+  # Kiosk UI
+  - template:             ces/web/kiosk_ui.yml@templates
+    parameters:
+      siteName:           'CES Kiosk UI ${{ parameters.deploymentEnvironment }}'
+      appPool:            'CES Kiosk UI ${{ parameters.deploymentEnvironment }}'
+      extraVariables:     variables/common/ces-kiosk-variables.yml
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      deploy:             ${{ parameters.deployCESKiosk }}
+      isDevEnv:           ${{ variables.isDevEnv }}
+      useMaintenancePage: ${{ parameters.useMaintenancePage }}
+      protocol:           'https'
+      sslThumbprint:      ${{ variables.certThumbprint }}
+      appCmd:             true
+  # Kiosk API
+  - template:             ces/web/kiosk_api.yml@templates
+    parameters:
+      siteName:           'CES Kiosk API ${{ parameters.deploymentEnvironment }}'
+      appPool:            'CES Kiosk API ${{ parameters.deploymentEnvironment }}'
+      licenceRequired:    true
+      extraVariables:     variables/common/ces-kiosk-variables.yml
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      deploy:             ${{ parameters.deployCESKiosk }}
+      isDevEnv:           ${{ variables.isDevEnv }}
+      useMaintenancePage: ${{ parameters.useMaintenancePage }}
+      protocol:           'https'
+      sslThumbprint:      ${{ variables.certThumbprint }}
+      appCmd:             true
+  # CES Core / UI
+  - template:             ces/web/ces_ui.yml@templates
+    parameters:
+      siteName:           'CES Core ${{ parameters.deploymentEnvironment }}'
+      appName:            'UI'
+      appPool:            'UI ${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      deploy:             ${{ parameters.deployCESWebApps }}
+      extraVariables:     variables/common/ces-webapp-variables.yml
+      jsonConfigFiles:    
+      - 'ClientApp\dist\app\config\environment.json'
+      - 'ClientApp\dist\app\config\immediate.json'
+  # CES Core / Help
+  - template:             ces/web/ces_help.yml@templates
+    parameters:
+      siteName:           'CES Core ${{ parameters.deploymentEnvironment }}'
+      appName:            'Help'
+      appPool:            'Help ${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      deploy:             ${{ parameters.deployCESWebApps }}
+  # CES Core / CEFHelp
+  - template:             ces/web/cef_help.yml@templates
+    parameters:
+      siteName:           'CES Core ${{ parameters.deploymentEnvironment }}'
+      appName:            'CEFHelp'
+      appPool:            'CEFHelp ${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      deploy:             ${{ parameters.deployCESWebApps }}
+  # CES Core / TeacherToolKit 
+  - template:             ces/web/ces_teachertoolkit.yml@templates
+    parameters:
+      siteName:           'CES Core ${{ parameters.deploymentEnvironment }}'
+      appName:            'TeacherToolkit'
+      appPool:            'TeacherToolkit ${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      deploy:             ${{ parameters.deployCESWebApps }}
+      extraVariables:     variables/common/ces-webapp-variables.yml
+      jsonConfigFiles:    
+      - 'ClientApp\dist\app\config\environment.json'
+      - 'ClientApp\dist\app\config\immediate.json'
+  # CES Core / TimetableModelling
+  - template:             ces/web/ces_timetablemodelling.yml@templates
+    parameters:
+      siteName:           'CES Core ${{ parameters.deploymentEnvironment }}'
+      appName:            'TimetableModelling'
+      appPool:            'TimetableModelling ${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      deploy:             ${{ parameters.deployCESWebApps }}
+      extraVariables:     variables/common/ces-webapp-variables.yml
+      jsonConfigFiles:    
+      - 'ClientApp\dist\apps\core\app\config\environment.json'
+      - 'ClientApp\dist\apps\core\app\config\immediate.json'
+
+#-------------------------------------------------------------------------------
+# CES Integration
+#-------------------------------------------------------------------------------
+- stage:                  ces_integration
+  displayName:            CES Integration
+  dependsOn:
+  - licence
+  - ces_database
+  variables:
+  - template:             ../../common/legacy/ces-general-variables.yml
+  jobs:
+  # CES LISS
+  - template:             ces/integration/liss.yml@templates
+    parameters:
+      siteName:           'CES LISS ${{ parameters.deploymentEnvironment }}'
+      appPool:            'CES LISS ${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      isDevEnv:           ${{ variables.isDevEnv }}
+      useMaintenancePage: false
+      protocol:           'https'
+      sslThumbprint:      ${{ variables.certThumbprint }}
+      appCmd:             true
+  # CES SIF
+  - template:             ces/integration/sif.yml@templates
+    parameters:
+      siteName:           'CES SIF ${{ parameters.deploymentEnvironment }}'
+      appPool:            'CES SIF ${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      isDevEnv:           ${{ variables.isDevEnv }}
+      useMaintenancePage: false
+      protocol:           'https'
+      sslThumbprint:      ${{ variables.certThumbprint }}
+      appCmd:             true
+  # CES SMS Listener
+  - template:             ces/integration/sms_listener.yml@templates
+    parameters:
+      siteName:           'CES SMS Listener ${{ parameters.deploymentEnvironment }}'
+      appPool:            'CES SMS Listener ${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      isDevEnv:           ${{ variables.isDevEnv }}
+      useMaintenancePage: ${{ parameters.useMaintenancePage }}
+      protocol:           'https'
+      sslThumbprint:      ${{ variables.certThumbprint }}
+      appCmd:             true
+  # CES Standard API
+  - template:             ces/integration/standard_api.yml@templates
+    parameters:
+      siteName:           'CES Standard API ${{ parameters.deploymentEnvironment }}'
+      appPool:            'CES Standard API ${{ parameters.deploymentEnvironment }}'
+      licenceRequired:    true
+      extraVariables:     variables/common/ces-standardapi-variables.yml
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      isDevEnv:           ${{ variables.isDevEnv }}
+      useMaintenancePage: ${{ parameters.useMaintenancePage }}
+      protocol:           'https'
+      sslThumbprint:      ${{ variables.certThumbprint }}
+      appCmd:             true
+  # CES Standard Auth
+  - template:             ces/integration/standard_idp.yml@templates
+    parameters:
+      siteName:           'CES Standard Auth ${{ parameters.deploymentEnvironment }}'
+      appPool:            'CES Standard Auth ${{ parameters.deploymentEnvironment }}'
+      licenceRequired:    true
+      extraVariables:     variables/common/ces-standardapi-variables.yml
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Presentation
+      isDevEnv:           ${{ variables.isDevEnv }}
+      useMaintenancePage: ${{ parameters.useMaintenancePage }}
+      protocol:           'https'
+      sslThumbprint:      ${{ variables.certThumbprint }}
+      appCmd:             true
+
+#-------------------------------------------------------------------------------
+# CES Processing
+#-------------------------------------------------------------------------------
+- stage:                  ces_processing
+  displayName:            CES Processing
+  dependsOn:
+  - licence
+  - ces_database
+  variables:
+  - template:             ../../common/legacy/ces-general-variables.yml
+  jobs:
+  # CES Archive Job Executor
+  - template:             ces/processing/archive_job_executor.yml@templates
+    parameters:
+      serviceName:        'CESArchiveJobExecutor-${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      extraVariables:     variables/common/ces-archive-job-executor-variables.yml
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Processing
+  # CES Audit Consumer
+  - template:             ces/processing/audit_consumer.yml@templates
+    parameters:
+      serviceName:        'CESAuditAMQPConsumers-${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      extraVariables:     variables/common/ces-audit-consumer-variables.yml
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Processing
+  # CES Portal Consumers
+  - template:             ces/processing/ces_portal_consumers.yml@templates
+    parameters:
+      serviceName:        'CESAMQPConsumers-${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      extraVariables:     variables/common/ces-portal-consumers-variables.yml
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Processing
+  # CES Communication Consumer Email
+  - template:             ces/processing/comms_consumer_email.yml@templates
+    parameters:
+      serviceName:        'CESCommCenterAMQPConsumersEmail-${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      extraVariables:     variables/common/ces-comms-consumer-email-variables.yml
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Processing
+  # CES Communication Consumer SMS
+  - template:             ces/processing/comms_consumer_sms.yml@templates
+    parameters:
+      serviceName:        'CESCommCenterAMQPConsumersSMS-${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      extraVariables:     variables/common/ces-comms-consumer-sms-variables.yml
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Processing
+        #- template: ces/processing/event_worker.yml@templates
+        #  parameters:
+        #    serviceName: 'CommunityPortalAuditors-${{ parameters.deploymentEnvironment }}'
+  # CES Finance Job Executor
+  #- template:             ces/processing/finance_job_executor.yml@templates
+  #  parameters:
+  #    serviceName:        'CESFinanceJobExecutor-${{ parameters.deploymentEnvironment }}'
+  #    remoteRepo:         true
+  #    extraVariables:     variables/common/ces-finance-job-executor-variables.yml
+  #    environment:        ${{ parameters.deploymentEnvironment }}
+  #    environmentTag:     Processing
+  # CES General Job Executor
+  - template:             ces/processing/general_job_executor.yml@templates
+    parameters:
+      serviceName:        'CESGeneralJobExecutor-${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      extraVariables:     variables/common/ces-general-job-executor-variables.yml
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Processing
+  # CES Portal Job Executor
+  - template:             ces/processing/portal_job_executor.yml@templates
+    parameters:
+      serviceName:        'CESJobExecutor-${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      extraVariables:     variables/common/ces-portal-job-executor-variables.yml
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Processing
+  # CES Processing Consumers
+  - template:             ces/processing/processing_consumers.yml@templates
+    parameters:
+      serviceName:        'CESProcessingConsumers-${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      extraVariables:     variables/common/ces-processing-consumers-variables.yml
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Processing
+  # CES Timetabling Job Executor
+  - template:             ces/processing/timetabling_job_executor.yml@templates
+    parameters:
+      serviceName:        'CESTimetablingConsumers-${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      extraVariables:     variables/common/ces-timetabling-job-executor-variables.yml
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Processing
+  # CES Consumer Worker
+  - template:             ces/processing/event_worker.yml@templates
+    parameters:
+      serviceName:        'CESConsumerWorkerService-${{ parameters.deploymentEnvironment }}'
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Processing
+  # CES Standard Consumers
+  - template:             ces/processing/standard_consumers.yml@templates
+    parameters:
+      serviceName:        'CESStandardConsumers-${{ parameters.deploymentEnvironment }}'
+      licenceRequired:    true
+      extraVariables:     variables/common/ces-standardapi-variables.yml
+      remoteRepo:         true
+      environment:        ${{ parameters.deploymentEnvironment }}
+      environmentTag:     Processing
+
+#===============================================================================
+#    ___           __       __
+#   / _ \___  ____/ /____ _/ /
+#  / ___/ _ \/ __/ __/ _ `/ / 
+# /_/   \___/_/  \__/\_,_/_/  
+#                             
+#===============================================================================
+#-------------------------------------------------------------------------------
+# Portal Database
+#-------------------------------------------------------------------------------
+#- stage:                  portal_database
+#  displayName:            Portal Database
+#  variables:
+#  - template:             ../../common/legacy/portal-database-variables.yml
+#  jobs:
+#  - template:             portal/database/upgrade_portal_db.yml@templates
+#    parameters:
+#      remoteRepo:         true
+#      environment:        ${{ parameters.deploymentEnvironment }}
+#      environmentTag:     Tool
+#      jsonConfigFiles:                 # Only needed for pre-R2. Remove if version is greater than 2.5.5.
+#      - 'appsettings.Development.json' # Only needed for pre-R2. Remove if version is greater than 2.5.5.
+
+
+#-------------------------------------------------------------------------------
+# Portal Presentation
+#-------------------------------------------------------------------------------
+#- stage:                  portal_presentation
+#  displayName:            Portal Presentation
+#  dependsOn:
+#  - licence
+#  - portal_database
+#  variables:
+#  - template:             ../../common/legacy/portal-general-variables.yml
+#  jobs:
+#  # Portal Core
+#  - template:             portal/web/portal_core.yml@templates
+#    parameters:
+#      siteName:           'CP Core ${{ parameters.deploymentEnvironment }}'
+#      appPool:            'CP Core ${{ parameters.deploymentEnvironment }}'
+#      remoteRepo:         true
+#      environment:        ${{ parameters.deploymentEnvironment }}
+#      environmentTag:     Presentation
+#      isDevEnv:           ${{ variables.isDevEnv }}
+#      useMaintenancePage: ${{ parameters.useMaintenancePage }}
+#      protocol:           'https'
+#      sslThumbprint:      ${{ variables.certThumbprint }}
+#      appCmd:             true
+#  # Portal API
+#  - template:             portal/web/portal_api.yml@templates
+#    parameters:
+#      siteName:           'CP API ${{ parameters.deploymentEnvironment }}'
+#      appPool:            'CP API ${{ parameters.deploymentEnvironment }}'
+#      licenceRequired:    true
+#      remoteRepo:         true
+#      environment:        ${{ parameters.deploymentEnvironment }}
+#      environmentTag:     Presentation
+#      isDevEnv:           ${{ variables.isDevEnv }}
+#      useMaintenancePage: ${{ parameters.useMaintenancePage }}
+#      protocol:           'https'
+#      sslThumbprint:      ${{ variables.certThumbprint }}
+#      appCmd:             true
+#  # Portal Auth
+#  - template:             portal/web/portal_auth.yml@templates
+#    parameters:
+#      siteName:           'CP Auth ${{ parameters.deploymentEnvironment }}'
+#      appPool:            'CP Auth ${{ parameters.deploymentEnvironment }}'
+#      licenceRequired:    true
+#      remoteRepo:         true
+#      environment:        ${{ parameters.deploymentEnvironment }}
+#      environmentTag:     Presentation
+#      isDevEnv:           ${{ variables.isDevEnv }}
+#      useMaintenancePage: ${{ parameters.useMaintenancePage }}
+#      protocol:           'https'
+#      sslThumbprint:      ${{ variables.certThumbprint }}
+#      appCmd:             true
+#  # Portal Sync
+#  - template:             portal/web/portal_sync.yml@templates
+#    parameters:
+#      siteName:           'CP Sync API ${{ parameters.deploymentEnvironment }}'
+#      appPool:            'CP Sync API ${{ parameters.deploymentEnvironment }}'
+#      licenceRequired:    true
+#      remoteRepo:         true
+#      environment:        ${{ parameters.deploymentEnvironment }}
+#      environmentTag:     Presentation
+#      isDevEnv:           ${{ variables.isDevEnv }}
+#      useMaintenancePage: ${{ parameters.useMaintenancePage }}
+#      protocol:           'https'
+#      sslThumbprint:      ${{ variables.certThumbprint }}
+#      appCmd:             true
+
+#-------------------------------------------------------------------------------
+# Portal Processing
+#-------------------------------------------------------------------------------
+#- stage:                  portal_processing
+#  displayName:            Portal Processing
+#  dependsOn:
+#  - licence
+#  - portal_database
+#  variables:
+#  - template:             ../../common/legacy/portal-general-variables.yml
+#  jobs:
+#  # Portal Auditing
+#  - template:             portal/processing/portal_auditing.yml@templates
+#    parameters:
+#      serviceName:        'CommunityPortalAuditors-${{ parameters.deploymentEnvironment }}'
+#      remoteRepo:         true
+#      environment:        ${{ parameters.deploymentEnvironment }}
+#      environmentTag:     Processing
+#  # Portal Consumers
+#  - template:             portal/processing/portal_consumers.yml@templates
+#    parameters:
+#      serviceName:        'CommunityPortalAMQPConsumers-${{ parameters.deploymentEnvironment }}'
+#      licenceRequired:    true
+#      remoteRepo:         true
+#      environment:        ${{ parameters.deploymentEnvironment }}
+#      environmentTag:     Processing
+
+#===============================================================================
+#    _____                       
+#   / __(_)__  ___ ____  _______ 
+#  / _// / _ \/ _ `/ _ \/ __/ -_)
+# /_/ /_/_//_/\_,_/_//_/\__/\__/ 
+#                                
+#===============================================================================
+#-------------------------------------------------------------------------------
+# Finance Database
+#-------------------------------------------------------------------------------
+#- stage:                  cef_database
+#  displayName:            CEF Database
+#  variables:
+#  - template:             ../../common/legacy/cef-general-variables.yml
+#  jobs:
+#  - template:             cef/database/upgrade_cef_db.yml@templates
+#    parameters:
+#      environment:        ${{ parameters.deploymentEnvironment }}
+#      environmentTag:     Tool
+#      artifact:           'CEFinance-2.5.2-cefprod'
+#      artifactSubFolder:  'dbupgrade'
+
+#-------------------------------------------------------------------------------
+# Finance Presentation
+#-------------------------------------------------------------------------------
+#- stage:                  cef_presentation
+#  displayName:            CEF Presentation
+# dependsOn:              cef_database
+#  variables:
+#  - template:             ../../common/legacy/cef-general-variables.yml
+#  jobs:
+#  - template:             cef/web/cefinance_redirect.yml@templates
+#    parameters:
+#      siteName:           'CE Finance ${{ parameters.deploymentEnvironment }}'
+#      appPool:            'CE Finance ${{ parameters.deploymentEnvironment }}'
+#      remoteRepo:         true
+#      environment:        ${{ parameters.deploymentEnvironment }}
+#      environmentTag:     Finance
+#      isDevEnv:           false
+#      useMaintenancePage: false
+#  - template:             cef/web/cefinance-legacy.yml@templates
+#    parameters:
+#      siteName:           'CE Finance ${{ parameters.deploymentEnvironment }}'
+#      appName:            'cefinance'
+#      appPool:            'cefinance ${{ parameters.deploymentEnvironment }}'
+#      remoteRepo:         true
+#      environment:        ${{ parameters.deploymentEnvironment }}
+#      environmentTag:     Finance
+#      artifact:           'CEFinance-2.5.2-cefprod'
+#      zipArtifact:        'CEFinance-2.5.2-zips'
+#      zipScripts:
+#      - name:             'Expand-FinanceArchives.ps1'
+#        arguments:        '-Destination "$(webapp.path.finance)" -Filter ''.*.((BASE|OIDC)|(CEF)[0-9]{0,3}).zip'''
