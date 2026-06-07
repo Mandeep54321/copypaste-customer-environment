@@ -697,7 +697,7 @@ stages:
     parameters:
       environment:        ${{ parameters.deploymentEnvironment }}
       environmentTag:     Tool
-      artifact:           'CEFinance-2.5.5-cefprod'
+      artifact:           'CEFinance-2.5.6-cefprod'
       artifactSubFolder:  'dbupgrade'
 
 #-------------------------------------------------------------------------------
