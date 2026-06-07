@@ -66,7 +66,7 @@ resources:
   #  branch: release/release-R4-2024
   - pipeline: ces-build
     project: CES
-    source: ces-generic-release-build-2.5.X
+    source: ces-generic-release-build-2.6.X
     branch: minor/release-2.5.5
   - pipeline: ces-sif
     project: CES
