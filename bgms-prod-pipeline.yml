@@ -67,11 +67,11 @@ resources:
   - pipeline: ces-build
     project: CES
     source: ces-generic-release-build-2.6.X
-    branch: minor/release-2.5.5
+    branch: minor/release-2.5.6
   - pipeline: ces-sif
     project: CES
     source: ces-sif-build
-    branch: minor/release-2.5.5
+    branch: minor/release-2.5.6
   - pipeline: ces-help
     project: CES
     source: ces\ces-help\ces-help
